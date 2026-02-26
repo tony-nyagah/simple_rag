@@ -49,20 +49,24 @@ in _your_ documents instead of relying on the model's training data alone.
 ```
 simple_rag/
 ├── src/simple_rag/
-│   ├── rag.py          # Core RAG logic — chunking, embedding, retrieval, generation
-│   ├── api.py          # FastAPI REST API
-│   ├── main.py         # Interactive CLI
-│   └── eval.py         # LLM-as-a-judge evaluation harness
-├── pyproject.toml      # Project config & dependencies (Pixi)
+│   ├── rag.py            # Core RAG logic — chunking, embedding, retrieval, generation
+│   ├── api.py            # FastAPI REST API + UI routes
+│   ├── main.py           # Interactive CLI
+│   ├── eval.py           # LLM-as-a-judge evaluation harness
+│   └── static/
+│       ├── index.html    # Browser chat UI (HTML + JS)
+│       └── style.css     # Stylesheet (editorial newspaper aesthetic)
+├── pyproject.toml        # Project config & dependencies (Pixi)
 └── README.md
 ```
 
-| Module    | Purpose                                                                                                                                                                     |
-| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `rag.py`  | The engine. PDF extraction, sentence-aware chunking, Gemini embedding, cosine-similarity retrieval, and answer generation. Both the CLI and API import from here.           |
-| `api.py`  | FastAPI app wrapping the RAG engine into REST endpoints. Upload PDFs, manage documents, and query them over HTTP. Includes auto-generated interactive docs at `/docs`.      |
-| `main.py` | Minimal interactive CLI — load a PDF, ask questions in a loop.                                                                                                              |
-| `eval.py` | Automated evaluation harness: runs 10 test questions against "Attention is All You Need", uses Gemini as a judge, and prints a scored report with per-difficulty breakdown. |
+| Module          | Purpose                                                                                                                                                                     |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rag.py`        | The engine. PDF extraction, sentence-aware chunking, Gemini embedding, cosine-similarity retrieval, and answer generation. Both the CLI and API import from here.           |
+| `api.py`        | FastAPI app wrapping the RAG engine into REST endpoints. Also serves the browser UI at `/ui`. Includes auto-generated interactive docs at `/docs`.                          |
+| `main.py`       | Minimal interactive CLI — load a PDF, ask questions in a loop.                                                                                                              |
+| `eval.py`       | Automated evaluation harness: runs 10 test questions against "Attention is All You Need", uses Gemini as a judge, and prints a scored report with per-difficulty breakdown. |
+| `static/`       | Single-page browser UI. No build step — plain HTML, CSS, and vanilla JS served directly by FastAPI.                                                                        |
 
 ---
 
@@ -93,7 +97,24 @@ export GEMINI_API_KEY="your-api-key-here"
 
 ## Usage
 
-### 1. CLI — Interactive Chat
+### 1. Browser UI
+
+The easiest way to use Simple RAG. Start the server and open the UI in your
+browser:
+
+```bash
+pixi run serve
+# → http://localhost:8000/ui
+```
+
+From the UI you can:
+
+- **Upload** a PDF via drag-and-drop or the file picker
+- **Switch** between multiple loaded documents from the sidebar
+- **Chat** with the document — answers include a collapsible *Sources* section
+  showing the retrieved passages
+
+### 2. CLI — Interactive Chat
 
 Chat with a PDF directly in your terminal:
 
@@ -113,7 +134,7 @@ convolutions entirely...
 You: quit
 ```
 
-### 2. API — REST Interface
+### 3. API — REST Interface
 
 Start the API server:
 
@@ -127,6 +148,7 @@ pixi run serve
 
 | Method   | Path                  | Description                                   |
 | -------- | --------------------- | --------------------------------------------- |
+| `GET`    | `/ui`                 | Browser chat UI                               |
 | `POST`   | `/documents`          | Upload a PDF — chunks and embeds it in memory |
 | `GET`    | `/documents`          | List all loaded documents                     |
 | `GET`    | `/documents/{doc_id}` | Get metadata for a specific document          |
@@ -154,7 +176,7 @@ curl http://localhost:8000/documents
 curl -X DELETE http://localhost:8000/documents/a1b2c3d4e5f6
 ```
 
-### 3. Evaluation — LLM-as-a-Judge
+### 4. Evaluation — LLM-as-a-Judge
 
 Run an automated evaluation against the bundled "Attention is All You Need" PDF:
 
@@ -233,6 +255,13 @@ an impartial judge. The judge model is given the question, ground-truth answer,
 and RAG answer, then returns a structured JSON verdict (`CORRECT` /
 `PARTIALLY_CORRECT` / `INCORRECT`). This makes it easy to add new test cases
 without writing custom scoring logic.
+
+### Browser UI
+
+The UI is a single-page app served directly by FastAPI — no Node.js, no build
+step, no framework. `static/index.html` and `static/style.css` are read off
+disk and served at `/ui`. The JS communicates with the same REST endpoints used
+by the CLI.
 
 ---
 
