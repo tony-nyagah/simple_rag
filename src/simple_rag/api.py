@@ -10,10 +10,14 @@ Endpoints:
     GET    /documents/{doc_id} Get details for a specific document
     DELETE /documents/{doc_id} Remove a document from memory
     POST   /query              Ask a question against a loaded document
+    GET    /ui                 Browser chat UI
 """
 
+from pathlib import Path
+
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from simple_rag.rag import (
@@ -23,6 +27,8 @@ from simple_rag.rag import (
     list_documents,
     query_document,
 )
+
+_STATIC_DIR = Path(__file__).parent / "static"
 
 
 class PrettyJSONResponse(JSONResponse):
@@ -40,6 +46,26 @@ app = FastAPI(
     version="0.1.0",
     default_response_class=PrettyJSONResponse,
 )
+
+# Mount the static directory (CSS, JS assets if ever added)
+app.mount("/ui/static", StaticFiles(directory=_STATIC_DIR), name="ui-static")
+
+
+# ---------------------------------------------------------------------------
+# UI routes
+# ---------------------------------------------------------------------------
+
+
+@app.get("/ui", include_in_schema=False)
+async def ui_redirect():
+    """Redirect /ui -> /ui/ so relative paths in index.html resolve correctly."""
+    return RedirectResponse(url="/ui/")
+
+
+@app.get("/ui/", response_class=HTMLResponse, include_in_schema=False)
+async def ui():
+    """Serve the single-page RAG chat interface."""
+    return HTMLResponse((_STATIC_DIR / "index.html").read_text())
 
 
 # ---------------------------------------------------------------------------

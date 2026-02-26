@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Simple RAG — Document Chat</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Reset & base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:        #0b0f1a;
+      --surface:   #111827;
+      --surface2:  #1a2236;
+      --surface3:  #202d45;
+      --border:    rgba(99,120,180,0.18);
+      --accent:    #6366f1;
+      --accent2:   #818cf8;
+      --accent-glow: rgba(99,102,241,0.35);
+      --text:      #e5e9f5;
+      --text-muted:#8896b3;
+      --danger:    #ef4444;
+      --success:   #22c55e;
+      --radius:    14px;
+      --radius-sm: 8px;
+      --ease:      cubic-bezier(.4,0,.2,1);
+      --font:      'Inter', system-ui, sans-serif;
+    }
+    html, body { height: 100%; }
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 99px; }
+
+    /* ── Layout ── */
+    .app {
+      display: flex;
+      flex: 1;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      width: 300px;
+      flex-shrink: 0;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .sidebar-header {
+      padding: 24px 20px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 4px;
+    }
+    .logo-icon {
+      width: 32px; height: 32px;
+      background: linear-gradient(135deg, var(--accent), #a78bfa);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+    }
+    .logo h1 { font-size: 18px; font-weight: 700; letter-spacing: -.3px; }
+    .logo-sub { font-size: 12px; color: var(--text-muted); margin-left: 42px; }
+
+    /* Upload zone */
+    .upload-section { padding: 16px; border-bottom: 1px solid var(--border); }
+    .drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 20px 16px;
+      text-align: center;
+      cursor: pointer;
+      transition: all .25s var(--ease);
+      background: transparent;
+      position: relative;
+    }
+    .drop-zone:hover, .drop-zone.drag-over {
+      border-color: var(--accent);
+      background: rgba(99,102,241,0.06);
+    }
+    .drop-zone input[type="file"] {
+      position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+    }
+    .drop-icon { font-size: 28px; margin-bottom: 6px; }
+    .drop-label { font-size: 13px; font-weight: 500; color: var(--text); }
+    .drop-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+    /* Progress */
+    .upload-progress { margin-top: 10px; display: none; }
+    .upload-progress.visible { display: block; }
+    .progress-label {
+      display: flex; justify-content: space-between;
+      font-size: 11px; color: var(--text-muted); margin-bottom: 5px;
+    }
+    .progress-bar {
+      height: 4px; background: var(--surface3); border-radius: 99px; overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      border-radius: 99px;
+      width: 0%;
+      transition: width .3s var(--ease);
+    }
+    .progress-fill.indeterminate {
+      width: 40%;
+      animation: indeterminate 1.4s infinite var(--ease);
+    }
+    @keyframes indeterminate {
+      0%   { transform: translateX(-150%); }
+      100% { transform: translateX(350%); }
+    }
+
+    /* Doc list */
+    .docs-section {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 0;
+    }
+    .docs-label {
+      font-size: 10px; font-weight: 600; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--text-muted);
+      padding: 0 16px 8px;
+    }
+    .doc-empty {
+      font-size: 12px; color: var(--text-muted);
+      padding: 8px 16px;
+      font-style: italic;
+    }
+    .doc-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 16px;
+      cursor: pointer;
+      border-radius: 0;
+      transition: background .15s;
+      position: relative;
+    }
+    .doc-item:hover { background: var(--surface2); }
+    .doc-item.active {
+      background: rgba(99,102,241,0.12);
+    }
+    .doc-item.active::before {
+      content: '';
+      position: absolute; left: 0; top: 4px; bottom: 4px;
+      width: 3px; border-radius: 0 99px 99px 0;
+      background: var(--accent);
+    }
+    .doc-file-icon {
+      width: 32px; height: 32px; flex-shrink: 0;
+      background: var(--surface3);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 15px;
+    }
+    .doc-info { flex: 1; min-width: 0; }
+    .doc-name {
+      font-size: 13px; font-weight: 500;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .doc-meta { font-size: 11px; color: var(--text-muted); }
+    .doc-delete {
+      opacity: 0; flex-shrink: 0;
+      background: none; border: none; cursor: pointer;
+      color: var(--text-muted); font-size: 14px;
+      padding: 4px; border-radius: 6px;
+      transition: all .15s;
+      line-height: 1;
+    }
+    .doc-item:hover .doc-delete { opacity: 1; }
+    .doc-delete:hover { color: var(--danger); background: rgba(239,68,68,.1); }
+
+    /* ── Chat panel ── */
+    .chat-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+    }
+    .chat-header {
+      padding: 18px 28px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(11,15,26,0.9);
+      backdrop-filter: blur(10px);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 65px;
+    }
+    .chat-header-doc {
+      flex: 1; min-width: 0;
+    }
+    .chat-header-name {
+      font-size: 15px; font-weight: 600;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .chat-header-meta { font-size: 12px; color: var(--text-muted); }
+    .chat-doc-badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: rgba(99,102,241,.15);
+      border: 1px solid rgba(99,102,241,.3);
+      color: var(--accent2);
+      font-size: 11px; font-weight: 500;
+      padding: 3px 9px; border-radius: 99px;
+    }
+    .chat-doc-badge-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--success);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: .4; }
+    }
+
+    /* Messages */
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* Empty state */
+    .empty-state {
+      flex: 1;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      text-align: center; gap: 16px;
+      color: var(--text-muted);
+      padding: 40px;
+    }
+    .empty-icon {
+      width: 72px; height: 72px;
+      background: var(--surface2);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 32px;
+      border: 1px solid var(--border);
+    }
+    .empty-state h2 { font-size: 20px; font-weight: 600; color: var(--text); }
+    .empty-state p { font-size: 14px; max-width: 340px; line-height: 1.6; }
+    .empty-steps {
+      display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
+      margin-top: 8px;
+    }
+    .empty-step {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 8px 14px;
+      font-size: 12px;
+      display: flex; align-items: center; gap: 7px;
+    }
+    .step-num {
+      width: 18px; height: 18px;
+      background: var(--accent);
+      color: #fff;
+      border-radius: 50%;
+      font-size: 10px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+
+    /* Message bubbles */
+    .message { display: flex; gap: 12px; align-items: flex-start; max-width: 820px; }
+    .message.assistant { align-self: flex-start; }
+    .message.user { align-self: flex-end; flex-direction: row-reverse; }
+    .avatar {
+      width: 32px; height: 32px; border-radius: 50%;
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; font-weight: 600;
+    }
+    .avatar.ai {
+      background: linear-gradient(135deg, var(--accent), #a78bfa);
+      color: #fff;
+    }
+    .avatar.human {
+      background: var(--surface3);
+      border: 1px solid var(--border);
+    }
+    .bubble-wrap { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .bubble-meta { font-size: 11px; color: var(--text-muted); padding: 0 4px; }
+    .message.user .bubble-meta { text-align: right; }
+    .bubble {
+      padding: 12px 16px;
+      border-radius: var(--radius);
+      font-size: 14px; line-height: 1.7;
+      max-width: 680px;
+    }
+    .message.assistant .bubble {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-top-left-radius: 4px;
+    }
+    .message.user .bubble {
+      background: linear-gradient(135deg, var(--accent), #7c3aed);
+      color: #fff;
+      border-top-right-radius: 4px;
+      box-shadow: 0 4px 20px var(--accent-glow);
+    }
+
+    /* Sources accordion */
+    .sources {
+      margin-top: 6px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+    }
+    .sources-toggle {
+      display: flex; align-items: center; gap: 7px;
+      padding: 8px 12px;
+      background: var(--surface2);
+      cursor: pointer;
+      font-size: 12px; color: var(--text-muted);
+      font-weight: 500;
+      user-select: none;
+      border: none; width: 100%; text-align: left; color: var(--text-muted);
+      transition: background .15s;
+    }
+    .sources-toggle:hover { background: var(--surface3); }
+    .sources-toggle .chevron { transition: transform .2s; font-size: 10px; margin-left: auto; }
+    .sources-toggle.open .chevron { transform: rotate(180deg); }
+    .sources-body {
+      display: none;
+      border-top: 1px solid var(--border);
+    }
+    .sources-body.open { display: block; }
+    .source-chunk {
+      padding: 10px 12px;
+      font-size: 12px; color: var(--text-muted); line-height: 1.6;
+      border-bottom: 1px solid var(--border);
+    }
+    .source-chunk:last-child { border-bottom: none; }
+    .source-chunk-label {
+      font-size: 10px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .06em; color: var(--accent2); margin-bottom: 4px;
+    }
+
+    /* Thinking indicator */
+    .thinking {
+      display: flex; gap: 5px; align-items: center; padding: 12px 16px;
+    }
+    .thinking span {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--accent2);
+      animation: blink 1.4s infinite both;
+    }
+    .thinking span:nth-child(2) { animation-delay: .2s; }
+    .thinking span:nth-child(3) { animation-delay: .4s; }
+    @keyframes blink {
+      0%, 80%, 100% { transform: scale(0.6); opacity: .5; }
+      40%            { transform: scale(1);   opacity: 1; }
+    }
+
+    /* Input bar */
+    .chat-input-area {
+      padding: 16px 28px 20px;
+      border-top: 1px solid var(--border);
+      background: rgba(11,15,26,0.95);
+      backdrop-filter: blur(10px);
+    }
+    .input-row {
+      display: flex; gap: 10px; align-items: flex-end;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      transition: border-color .2s;
+    }
+    .input-row:focus-within {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+    .chat-input {
+      flex: 1;
+      background: none; border: none; outline: none;
+      color: var(--text); font-family: var(--font);
+      font-size: 14px; line-height: 1.5;
+      resize: none; max-height: 160px;
+      overflow-y: auto;
+    }
+    .chat-input::placeholder { color: var(--text-muted); }
+    .send-btn {
+      width: 36px; height: 36px; flex-shrink: 0;
+      background: var(--accent);
+      border: none; border-radius: var(--radius-sm);
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      color: #fff; font-size: 16px;
+      transition: all .2s;
+    }
+    .send-btn:hover:not(:disabled) {
+      background: var(--accent2);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px var(--accent-glow);
+    }
+    .send-btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+    .input-hint { font-size: 11px; color: var(--text-muted); margin-top: 8px; text-align: center; }
+
+    /* ── Toast ── */
+    #toasts {
+      position: fixed; bottom: 24px; right: 24px;
+      display: flex; flex-direction: column; gap: 10px;
+      z-index: 9999; pointer-events: none;
+    }
+    .toast {
+      display: flex; align-items: center; gap: 10px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      padding: 12px 16px;
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.4);
+      pointer-events: auto;
+      animation: slideUp .3s var(--ease);
+      max-width: 360px;
+    }
+    .toast.error { border-color: rgba(239,68,68,.4); color: #fca5a5; }
+    .toast.success { border-color: rgba(34,197,94,.3); color: #86efac; }
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">
+        <div class="logo-icon">🔍</div>
+        <h1>Simple RAG</h1>
+      </div>
+      <div class="logo-sub">Powered by Google Gemini</div>
+    </div>
+
+    <div class="upload-section">
+      <div class="drop-zone" id="dropZone">
+        <input type="file" id="fileInput" accept=".pdf" />
+        <div class="drop-icon">📄</div>
+        <div class="drop-label">Drop a PDF here</div>
+        <div class="drop-sub">or click to browse</div>
+      </div>
+      <div class="upload-progress" id="uploadProgress">
+        <div class="progress-label">
+          <span id="uploadLabel">Uploading…</span>
+          <span id="uploadPct"></span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill indeterminate" id="progressFill"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="docs-section">
+      <div class="docs-label">Documents</div>
+      <div id="docList">
+        <div class="doc-empty">No documents yet</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Chat -->
+  <main class="chat-panel">
+    <div class="chat-header" id="chatHeader">
+      <div class="empty-icon" style="width:36px;height:36px;font-size:18px;background:var(--surface2);border-radius:10px;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;">💬</div>
+      <div class="chat-header-doc">
+        <div class="chat-header-name" id="headerName">Document Chat</div>
+        <div class="chat-header-meta" id="headerMeta">Upload a PDF to get started</div>
+      </div>
+    </div>
+
+    <div class="messages" id="messages">
+      <!-- Empty state -->
+      <div class="empty-state" id="emptyState">
+        <div class="empty-icon">🔍</div>
+        <h2>Chat with your documents</h2>
+        <p>Upload any PDF and ask questions. Answers are grounded in the document's content using Gemini embeddings.</p>
+        <div class="empty-steps">
+          <div class="empty-step"><span class="step-num">1</span>Upload a PDF</div>
+          <div class="empty-step"><span class="step-num">2</span>Select a document</div>
+          <div class="empty-step"><span class="step-num">3</span>Ask anything</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="chat-input-area">
+      <div class="input-row">
+        <textarea
+          class="chat-input"
+          id="chatInput"
+          rows="1"
+          placeholder="Ask a question about the document…"
+          disabled
+        ></textarea>
+        <button class="send-btn" id="sendBtn" disabled title="Send">
+          ➤
+        </button>
+      </div>
+      <div class="input-hint">Press <kbd style="background:var(--surface2);padding:1px 5px;border-radius:4px;border:1px solid var(--border);">Enter</kbd> to send · <kbd style="background:var(--surface2);padding:1px 5px;border-radius:4px;border:1px solid var(--border);">Shift+Enter</kbd> for newline</div>
+    </div>
+  </main>
+
+</div>
+
+<!-- Toast container -->
+<div id="toasts"></div>
+
+<script>
+/* ── State ── */
+let activeDocId   = null;
+let activeDocName = null;
+let isWaiting     = false;
+
+/* ── DOM refs ── */
+const dropZone      = document.getElementById('dropZone');
+const fileInput     = document.getElementById('fileInput');
+const uploadProgress= document.getElementById('uploadProgress');
+const uploadLabel   = document.getElementById('uploadLabel');
+const progressFill  = document.getElementById('progressFill');
+const docList       = document.getElementById('docList');
+const messages      = document.getElementById('messages');
+const emptyState    = document.getElementById('emptyState');
+const chatInput     = document.getElementById('chatInput');
+const sendBtn       = document.getElementById('sendBtn');
+const headerName    = document.getElementById('headerName');
+const headerMeta    = document.getElementById('headerMeta');
+
+/* ── Toast ── */
+function toast(msg, type = 'info') {
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
+  el.textContent = msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+/* ── Drag-and-drop ── */
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) uploadFile(file);
+});
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) uploadFile(fileInput.files[0]);
+  fileInput.value = '';
+});
+
+/* ── Upload ── */
+async function uploadFile(file) {
+  if (!file.name.endsWith('.pdf')) { toast('Only PDF files are supported.', 'error'); return; }
+
+  uploadProgress.classList.add('visible');
+  uploadLabel.textContent = `Ingesting "${file.name}"…`;
+  progressFill.classList.add('indeterminate');
+
+  const form = new FormData();
+  form.append('file', file);
+
+  try {
+    const res = await fetch('/documents', { method: 'POST', body: form });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Upload failed' }));
+      throw new Error(err.detail || 'Upload failed');
+    }
+    const doc = await res.json();
+    toast(`✓ "${doc.name}" ingested (${doc.num_chunks} chunks)`, 'success');
+    await loadDocuments();
+    selectDoc(doc.doc_id, doc.name, doc.num_chunks);
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    uploadProgress.classList.remove('visible');
+    progressFill.classList.remove('indeterminate');
+  }
+}
+
+/* ── Doc list ── */
+async function loadDocuments() {
+  try {
+    const res = await fetch('/documents');
+    const docs = await res.json();
+    renderDocList(docs);
+  } catch (e) {
+    toast('Failed to load documents', 'error');
+  }
+}
+
+function renderDocList(docs) {
+  if (!docs.length) {
+    docList.innerHTML = '<div class="doc-empty">No documents yet</div>';
+    return;
+  }
+  docList.innerHTML = '';
+  docs.forEach(doc => {
+    const item = document.createElement('div');
+    item.className = 'doc-item' + (doc.doc_id === activeDocId ? ' active' : '');
+    item.dataset.id = doc.doc_id;
+    item.innerHTML = `
+      <div class="doc-file-icon">📄</div>
+      <div class="doc-info">
+        <div class="doc-name" title="${esc(doc.name)}">${esc(doc.name)}</div>
+        <div class="doc-meta">${doc.num_chunks} chunks</div>
+      </div>
+      <button class="doc-delete" title="Delete" data-id="${esc(doc.doc_id)}">✕</button>
+    `;
+    item.addEventListener('click', () => selectDoc(doc.doc_id, doc.name, doc.num_chunks));
+    item.querySelector('.doc-delete').addEventListener('click', e => {
+      e.stopPropagation();
+      deleteDoc(doc.doc_id, doc.name);
+    });
+    docList.appendChild(item);
+  });
+}
+
+function selectDoc(id, name, numChunks) {
+  activeDocId   = id;
+  activeDocName = name;
+
+  // Update sidebar active state
+  document.querySelectorAll('.doc-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.id === id);
+  });
+
+  // Update header
+  headerName.textContent = name;
+  headerMeta.innerHTML = `
+    <span>${numChunks} chunks indexed</span>
+    &nbsp;·&nbsp;
+    <span class="chat-doc-badge"><span class="chat-doc-badge-dot"></span>Ready</span>
+  `;
+
+  // Enable input
+  chatInput.disabled = false;
+  chatInput.placeholder = `Ask a question about "${name}"…`;
+  sendBtn.disabled = false;
+
+  // Clear messages and show welcome
+  messages.innerHTML = '';
+  appendMessage('assistant', `I've loaded **${name}**. What would you like to know?`);
+  chatInput.focus();
+}
+
+async function deleteDoc(id, name) {
+  try {
+    const res = await fetch(`/documents/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Delete failed');
+    toast(`"${name}" removed`, 'success');
+    if (activeDocId === id) {
+      activeDocId = null;
+      activeDocName = null;
+      chatInput.disabled = true;
+      chatInput.placeholder = 'Ask a question about the document…';
+      sendBtn.disabled = true;
+      headerName.textContent = 'Document Chat';
+      headerMeta.textContent = 'Upload a PDF to get started';
+      messages.innerHTML = '';
+      messages.appendChild(emptyState);
+      emptyState.style.display = '';
+    }
+    await loadDocuments();
+  } catch (e) {
+    toast('Failed to delete document', 'error');
+  }
+}
+
+/* ── Chat ── */
+chatInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+sendBtn.addEventListener('click', sendMessage);
+
+// Auto-resize textarea
+chatInput.addEventListener('input', () => {
+  chatInput.style.height = 'auto';
+  chatInput.style.height = Math.min(chatInput.scrollHeight, 160) + 'px';
+});
+
+async function sendMessage() {
+  const q = chatInput.value.trim();
+  if (!q || !activeDocId || isWaiting) return;
+
+  isWaiting = true;
+  chatInput.value = '';
+  chatInput.style.height = 'auto';
+  sendBtn.disabled = true;
+
+  // Remove empty state
+  if (emptyState.parentNode === messages) messages.removeChild(emptyState);
+
+  appendMessage('user', q);
+  const thinkEl = appendThinking();
+
+  try {
+    const res = await fetch('/query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ doc_id: activeDocId, question: q }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Query failed' }));
+      throw new Error(err.detail || 'Query failed');
+    }
+    const data = await res.json();
+    thinkEl.remove();
+    appendMessage('assistant', data.answer, data.context_chunks);
+  } catch (e) {
+    thinkEl.remove();
+    appendMessage('assistant', `⚠️ ${e.message}`);
+  } finally {
+    isWaiting = false;
+    sendBtn.disabled = false;
+    chatInput.focus();
+  }
+}
+
+function appendMessage(role, text, sources) {
+  const isUser = role === 'user';
+  const wrap = document.createElement('div');
+  wrap.className = `message ${role}`;
+
+  const avatar = document.createElement('div');
+  avatar.className = `avatar ${isUser ? 'human' : 'ai'}`;
+  avatar.textContent = isUser ? '🧑' : '✦';
+
+  const bubbleWrap = document.createElement('div');
+  bubbleWrap.className = 'bubble-wrap';
+
+  const meta = document.createElement('div');
+  meta.className = 'bubble-meta';
+  meta.textContent = isUser ? 'You' : 'RAG Assistant';
+
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.innerHTML = renderMarkdown(text);
+
+  bubbleWrap.appendChild(meta);
+  bubbleWrap.appendChild(bubble);
+
+  if (sources && sources.length) {
+    const acc = buildSourcesAccordion(sources);
+    bubbleWrap.appendChild(acc);
+  }
+
+  wrap.appendChild(avatar);
+  wrap.appendChild(bubbleWrap);
+  messages.appendChild(wrap);
+  scrollBottom();
+  return wrap;
+}
+
+function appendThinking() {
+  const wrap = document.createElement('div');
+  wrap.className = 'message assistant';
+
+  const avatar = document.createElement('div');
+  avatar.className = 'avatar ai';
+  avatar.textContent = '✦';
+
+  const bubbleWrap = document.createElement('div');
+  bubbleWrap.className = 'bubble-wrap';
+
+  const meta = document.createElement('div');
+  meta.className = 'bubble-meta';
+  meta.textContent = 'RAG Assistant';
+
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.style.padding = '0';
+  bubble.innerHTML = `<div class="thinking"><span></span><span></span><span></span></div>`;
+
+  bubbleWrap.appendChild(meta);
+  bubbleWrap.appendChild(bubble);
+  wrap.appendChild(avatar);
+  wrap.appendChild(bubbleWrap);
+  messages.appendChild(wrap);
+  scrollBottom();
+  return wrap;
+}
+
+function buildSourcesAccordion(chunks) {
+  const acc = document.createElement('div');
+  acc.className = 'sources';
+
+  const toggle = document.createElement('button');
+  toggle.className = 'sources-toggle';
+  toggle.innerHTML = `<span>📎</span> ${chunks.length} source${chunks.length>1?'s':''} retrieved <span class="chevron">▾</span>`;
+
+  const body = document.createElement('div');
+  body.className = 'sources-body';
+
+  chunks.forEach((chunk, i) => {
+    const div = document.createElement('div');
+    div.className = 'source-chunk';
+    div.innerHTML = `<div class="source-chunk-label">Chunk ${i + 1}</div>${esc(chunk)}`;
+    body.appendChild(div);
+  });
+
+  toggle.addEventListener('click', () => {
+    toggle.classList.toggle('open');
+    body.classList.toggle('open');
+  });
+
+  acc.appendChild(toggle);
+  acc.appendChild(body);
+  return acc;
+}
+
+/* ── Utilities ── */
+function scrollBottom() {
+  messages.scrollTo({ top: messages.scrollHeight, behavior: 'smooth' });
+}
+
+function esc(str) {
+  return String(str)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;');
+}
+
+function renderMarkdown(text) {
+  // Bold, italic, inline code, and paragraphs — minimal safe renderer
+  let html = esc(text);
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  html = html.replace(/`([^`]+)`/g, '<code style="background:var(--surface3);padding:1px 5px;border-radius:4px;font-size:13px;font-family:monospace">$1</code>');
+  html = html.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>');
+  return `<p>${html}</p>`;
+}
+
+/* ── Init ── */
+loadDocuments();
+</script>
+</body>
+</html>
