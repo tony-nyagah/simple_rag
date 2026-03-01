@@ -2,7 +2,7 @@ FROM ghcr.io/prefix-dev/pixi:latest AS build
 
 WORKDIR /app
 
-# Copy manifest files first for layer caching
+# Copy manifest files (linux-64 + linux-aarch64 lock file)
 COPY pyproject.toml pixi.lock ./
 COPY src/ ./src/
 
