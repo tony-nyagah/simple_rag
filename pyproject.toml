@@ -10,10 +10,11 @@ requires = ["hatchling"]
 
 [tool.pixi.workspace]
 channels = ["conda-forge"]
-platforms = ["linux-64"]
+platforms = ["linux-64", "linux-aarch64"]
 
 [tool.pixi.pypi-dependencies]
 simple_rag = { path = ".", editable = true }
+pymupdf = ">=1.26.1,<2"
 
 [tool.pixi.tasks]
 serve = "uvicorn simple_rag.api:app --reload"
@@ -23,7 +24,6 @@ lint = "ruff check ."
 
 [tool.pixi.dependencies]
 google-genai = ">=1.0.0,<2"
-pymupdf = ">=1.26.1,<2"
 numpy = ">=2.4.2,<3"
 fastapi = ">=0.115,<1"
 uvicorn = ">=0.34,<1"
