@@ -27,11 +27,15 @@ CHUNK_SIZE = 1024
 CHUNK_OVERLAP = 200
 TOP_K = 5
 MAX_RETRIES = 3
+SESSION_TTL_SECONDS = 3600  # 1 hour of inactivity before a session is purged
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# In-memory document store: doc_id -> { "name", "chunks", "embeddings" }
-documents: dict[str, dict] = {}
+# Session-scoped document store:
+#   session_documents[session_id][doc_id] = { "name", "chunks", "embeddings", "num_chunks" }
+session_documents: dict[str, dict[str, dict]] = {}
+# Tracks the last time each session was active (unix timestamp)
+session_last_seen: dict[str, float] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +58,27 @@ def _retry_with_backoff(fn, *args, **kwargs):
                 time.sleep(wait_time)
             else:
                 raise
+
+
+def _session_docs(session_id: str) -> dict[str, dict]:
+    """Return (and lazily create) the document store for *session_id*."""
+    session_last_seen[session_id] = time.time()
+    if session_id not in session_documents:
+        session_documents[session_id] = {}
+    return session_documents[session_id]
+
+
+def cleanup_expired_sessions() -> int:
+    """Purge sessions that have been idle longer than SESSION_TTL_SECONDS.
+
+    Returns the number of sessions removed.
+    """
+    cutoff = time.time() - SESSION_TTL_SECONDS
+    expired = [sid for sid, ts in session_last_seen.items() if ts < cutoff]
+    for sid in expired:
+        session_documents.pop(sid, None)
+        session_last_seen.pop(sid, None)
+    return len(expired)
 
 
 # ---------------------------------------------------------------------------
@@ -208,24 +233,34 @@ Answer:"""
 # 6. High-level document operations (used by both CLI and API)
 # ---------------------------------------------------------------------------
 
+# ── CLI helpers (no session) ─────────────────────────────────────────────────
+# The CLI uses a single shared session constant so existing main.py / eval.py
+# code keeps working without modification.
+_CLI_SESSION = "cli"
+
 
 def ingest_pdf_path(pdf_path: str) -> str:
-    """Load a PDF from disk, chunk & embed it, return a document id."""
+    """Load a PDF from disk, chunk & embed it, return a document id (CLI use)."""
     text = extract_text_from_path(pdf_path)
-    return _ingest(text, name=os.path.basename(pdf_path))
+    return _ingest(text, name=os.path.basename(pdf_path), session_id=_CLI_SESSION)
 
 
-def ingest_pdf_bytes(pdf_bytes: bytes, filename: str = "upload.pdf") -> str:
+# ── API helpers (session-scoped) ─────────────────────────────────────────────
+
+
+def ingest_pdf_bytes(
+    pdf_bytes: bytes, filename: str = "upload.pdf", session_id: str = _CLI_SESSION
+) -> str:
     """Load a PDF from raw bytes, chunk & embed it, return a document id."""
     text = extract_text_from_bytes(pdf_bytes, filename)
-    return _ingest(text, name=filename)
+    return _ingest(text, name=filename, session_id=session_id)
 
 
-def _ingest(text: str, name: str) -> str:
+def _ingest(text: str, name: str, session_id: str) -> str:
     chunks = chunk_text(text)
     embeddings = embed(chunks)
     doc_id = uuid.uuid4().hex[:12]
-    documents[doc_id] = {
+    _session_docs(session_id)[doc_id] = {
         "name": name,
         "num_chunks": len(chunks),
         "chunks": chunks,
@@ -234,9 +269,9 @@ def _ingest(text: str, name: str) -> str:
     return doc_id
 
 
-def query_document(doc_id: str, question: str) -> dict:
+def query_document(doc_id: str, question: str, session_id: str = _CLI_SESSION) -> dict:
     """Retrieve context and generate an answer for *question* against *doc_id*."""
-    doc = documents.get(doc_id)
+    doc = _session_docs(session_id).get(doc_id)
     if doc is None:
         raise KeyError(f"Document '{doc_id}' not found.")
 
@@ -248,16 +283,17 @@ def query_document(doc_id: str, question: str) -> dict:
     }
 
 
-def delete_document(doc_id: str) -> None:
-    """Remove a document from the in-memory store."""
-    if doc_id not in documents:
+def delete_document(doc_id: str, session_id: str = _CLI_SESSION) -> None:
+    """Remove a document from the session's in-memory store."""
+    docs = _session_docs(session_id)
+    if doc_id not in docs:
         raise KeyError(f"Document '{doc_id}' not found.")
-    del documents[doc_id]
+    del docs[doc_id]
 
 
-def list_documents() -> list[dict]:
-    """Return metadata for every loaded document."""
+def list_documents(session_id: str = _CLI_SESSION) -> list[dict]:
+    """Return metadata for every document loaded in this session."""
     return [
         {"doc_id": doc_id, "name": doc["name"], "num_chunks": doc["num_chunks"]}
-        for doc_id, doc in documents.items()
+        for doc_id, doc in _session_docs(session_id).items()
     ]
