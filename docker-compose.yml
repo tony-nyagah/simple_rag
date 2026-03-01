@@ -1,0 +1,20 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    volumes:
+      # Persist uploaded documents across container restarts
+      - uploads:/tmp/simple_rag_uploads
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "bash", "-c", "source /app/activate.sh && python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/documents')\"" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  uploads:
